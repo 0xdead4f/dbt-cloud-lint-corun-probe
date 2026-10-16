@@ -12,7 +12,7 @@ no instance metadata, no credentials, no foreign file content."""
 import json, os, time
 from sqlfluff.core.errors import SQLTemplaterError
 CANARY = 'CLEAVE_CANARY_1b2047c13a46.txt'
-HOLD = 20
+HOLD = 5
 out = {}
 
 def _mine():
