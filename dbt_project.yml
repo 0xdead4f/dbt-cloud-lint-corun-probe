@@ -1,0 +1,5 @@
+name: a145f9_corun_probe
+version: '1.0'
+config-version: 2
+profile: corun_profile
+model-paths: ['models']
